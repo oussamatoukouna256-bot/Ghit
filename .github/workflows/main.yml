@@ -1,0 +1,66 @@
+name: Shadow RDP Gateway
+on:
+  workflow_dispatch:
+jobs:
+  shadow-access:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+    steps:
+      - name: Forge Dark Portal
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0
+          netsh advfirewall firewall add rule name="ShadowGate" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+
+      - name: Summon Gatekeeper
+        run: |
+          $shadowUser = "VOIDWALKER"
+          $cipherKey = "Abyss@1234"  # 11 chars
+          $cipherPass = ConvertTo-SecureString $cipherKey -AsPlainText -Force
+
+          if (-not (Get-LocalUser -Name $shadowUser -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name $shadowUser -Password $cipherPass -AccountNeverExpires
+          }
+
+          Add-LocalGroupMember -Group "Administrators" -Member $shadowUser
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $shadowUser
+
+          echo "SHADOW_CREDS=VOIDWALKER:$cipherKey" >> $env:GITHUB_ENV
+
+      - name: Weave Veil Network
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          $installerPath = "$env:TEMP\ts-veil.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          Remove-Item $installerPath -Force
+
+      - name: Activate Spectral Bridge
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=spectral-node-$env:GITHUB_RUN_ID
+          $veilIP = $null
+          for ($i=0; $i -lt 12 -and -not $veilIP; $i++) {
+              $veilIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+          }
+          if (-not $veilIP) { exit 1 }
+          echo "VEIL_IP=$veilIP" >> $env:GITHUB_ENV
+
+      - name: Test Abyssal Connection
+        run: |
+          $gateTest = Test-NetConnection -ComputerName $env:VEIL_IP -Port 3389
+          if (-not $gateTest.TcpTestSucceeded) { exit 1 }
+          Write-Host "Portal stabilized - RDP accessible"
+
+      - name: Sustain Dark Gateway
+        run: |
+          Write-Host "`n=== SHADOW GATE ACTIVE ===" -ForegroundColor Red
+          Write-Host "Gateway: $env:VEIL_IP"
+          Write-Host "Keymaster: VOIDWALKER"
+          Write-Host "Cipher: Abyss@1234"
+          Write-Host "=========================`n"
+          while ($true) {
+              Write-Host "[$(Get-Date)] Gateway sustained - Terminate workflow to collapse" -ForegroundColor DarkYellow
+              Start-Sleep -Seconds 300
+          }
